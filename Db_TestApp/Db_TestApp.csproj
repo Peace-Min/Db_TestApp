@@ -69,16 +69,7 @@
     <None Include="App.config" />
     <None Include="packages.config" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\Db_ReadApp\Db_ReadApp.csproj">
-      <Project>{76243734-a8b9-473c-a2d7-c83337b7ce4f}</Project>
-      <Name>Db_ReadApp</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\Db_WriteApp\Db_WriteApp.csproj">
-      <Project>{79ebb8af-cdb3-4dd0-8046-7b9d14a43ec9}</Project>
-      <Name>Db_WriteApp</Name>
-    </ProjectReference>
-  </ItemGroup>
+
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
