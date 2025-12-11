@@ -36,9 +36,6 @@ namespace Db_TestApp
                     case "2":
                         RunConcurrentReadWriteTest();
                         break;
-                    //case "3":
-                    //    RunMonteCarloTest();
-                    //    break;
                     case "0":
                         return;
                     default:
@@ -311,27 +308,6 @@ namespace Db_TestApp
             Console.ReadLine();
         }
 
-        static void InitializeDatabase(string dbPath)
-        {
-            string connectionString = $"Data Source={dbPath};Version=3;Pooling=False;";
-            using (var connection = new SQLiteConnection(connectionString))
-            {
-                connection.Open();
-                using (var cmd = connection.CreateCommand())
-                {
-                    cmd.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
-                    cmd.ExecuteNonQuery();
-
-                    cmd.CommandText = @"CREATE TABLE IF NOT EXISTS Object_Table_0 (
-                        s_time REAL, 
-                        COL0 REAL, COL1 REAL, COL2 REAL, COL3 REAL, COL4 REAL, COL5 REAL, COL6 REAL, COL7 REAL, 
-                        COL8 REAL, COL9 INTEGER, COL10 REAL, COL11 REAL, COL12 REAL, COL13 REAL, COL14 REAL, COL15 REAL
-                    );";
-                    cmd.ExecuteNonQuery();
-                }
-            }
-        }
-
         static void RunPerformanceTest()
         {
             Console.Clear();
@@ -389,145 +365,6 @@ namespace Db_TestApp
             Console.ReadLine();
         }
 
-        static void RunMonteCarloTest()
-        {
-            Console.Clear();
-            Console.WriteLine("=== 몬테카를로 시뮬레이션 (100회) ===");
-            Console.WriteLine();
-            Console.Write("각 시뮬레이션 트랜잭션 수 (기본 3000): ");
-            string input = Console.ReadLine();
-            int transactionsPerSim = string.IsNullOrEmpty(input) ? 3000 : int.Parse(input);
-
-            Console.Write("트랜잭션 당 레코드 수 (기본 100): ");
-            input = Console.ReadLine();
-            int recordsPerTransaction = string.IsNullOrEmpty(input) ? 100 : int.Parse(input);
-
-            Console.WriteLine();
-            Console.WriteLine($"설정: 100회 × {transactionsPerSim:N0} 트랜잭션, 트랜잭션 당 {recordsPerTransaction:N0}개");
-            Console.WriteLine();
-
-            int memoryStartLine = Console.CursorTop;
-            Console.WriteLine("___________________");
-            Console.WriteLine("MEMORY 모드");
-            Console.WriteLine("진행: 0 / 100");
-            Console.WriteLine("경과 시간: 00:00:00");
-            Console.WriteLine("___________________");
-            Console.WriteLine();
-
-            int walDefaultStartLine = Console.CursorTop;
-            Console.WriteLine("___________________");
-            Console.WriteLine("WAL (기본 Checkpoint)");
-            Console.WriteLine("진행: 0 / 100");
-            Console.WriteLine("경과 시간: 00:00:00");
-            Console.WriteLine("___________________");
-            Console.WriteLine();
-
-            int walNoCheckpointStartLine = Console.CursorTop;
-            Console.WriteLine("___________________");
-            Console.WriteLine("WAL (Checkpoint=0)");
-            Console.WriteLine("진행: 0 / 100");
-            Console.WriteLine("경과 시간: 00:00:00");
-            Console.WriteLine("___________________");
-            Console.WriteLine();
-
-            // 순차 실행으로 변경하여 I/O 간섭 제거
-            Console.WriteLine(">>> MEMORY 모드 테스트 시작...");
-            RunMonteCarloSimulation("MEMORY", transactionsPerSim, recordsPerTransaction, memoryStartLine, false);
-
-            Console.WriteLine();
-            Console.WriteLine(">>> WAL (기본 Checkpoint) 테스트 시작...");
-            RunMonteCarloSimulation("WAL_DEFAULT", transactionsPerSim, recordsPerTransaction, walDefaultStartLine, false);
-
-            Console.WriteLine();
-            Console.WriteLine(">>> WAL (Checkpoint=0) 테스트 시작...");
-            RunMonteCarloSimulation("WAL_NO_CHECKPOINT", transactionsPerSim, recordsPerTransaction, walNoCheckpointStartLine, true);
-
-            Console.SetCursorPosition(0, walNoCheckpointStartLine + 6);
-            Console.WriteLine();
-            Console.WriteLine("=== 몬테카를로 시뮬레이션 완료 ===");
-            Console.WriteLine("엔터키를 누르면 메뉴로 돌아갑니다...");
-            Console.ReadLine();
-        }
-
-        static void RunMonteCarloSimulation(string mode, int transactionsPerSim, int recordsPerTransaction, int startLine, bool disableCheckpoint)
-        {
-            Stopwatch totalSw = Stopwatch.StartNew();
-            int simulations = 100;
-
-            // 별도 폴더 생성하여 간섭 방지
-            string baseFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"Test_Data_{mode}");
-            if (Directory.Exists(baseFolder)) Directory.Delete(baseFolder, true); // 초기화
-            Directory.CreateDirectory(baseFolder);
-
-            for (int sim = 0; sim < simulations; sim++)
-            {
-                string dbPath = Path.Combine(baseFolder, $"monte_{mode}_{sim}.db");
-
-                WriteWithMode(dbPath, mode.StartsWith("WAL") ? "WAL" : "MEMORY", transactionsPerSim, recordsPerTransaction, int.MaxValue, -1, disableCheckpoint);
-
-                UpdateMonteCarloProgress(mode, sim + 1, simulations, totalSw.Elapsed, startLine);
-            }
-
-            totalSw.Stop();
-            UpdateMonteCarloFinal(mode, simulations, totalSw.Elapsed, startLine);
-        }
-
-        static void UpdateMonteCarloProgress(string mode, int current, int total, TimeSpan elapsed, int startLine)
-        {
-            lock (consoleLock)
-            {
-                try
-                {
-                    Console.CursorVisible = false;
-                    Console.SetCursorPosition(0, startLine);
-                    Console.Write("___________________".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 1);
-                    string modeName = mode == "MEMORY" ? "MEMORY 모드" :
-                                     mode == "WAL_DEFAULT" ? "WAL (기본 Checkpoint)" :
-                                     "WAL (Checkpoint=0)";
-                    Console.Write(modeName.PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 2);
-                    Console.Write($"진행: {current} / {total}".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 3);
-                    Console.Write($"경과 시간: {elapsed:hh\\:mm\\:ss\\.fff}".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 4);
-                    Console.Write("___________________".PadRight(Console.WindowWidth - 1));
-                }
-                finally
-                {
-                    Console.CursorVisible = true;
-                }
-            }
-        }
-
-        static void UpdateMonteCarloFinal(string mode, int total, TimeSpan elapsed, int startLine)
-        {
-            lock (consoleLock)
-            {
-                try
-                {
-                    Console.CursorVisible = false;
-                    Console.SetCursorPosition(0, startLine);
-                    Console.Write("___________________".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 1);
-                    string modeName = mode == "MEMORY" ? "MEMORY 완료!" :
-                                     mode == "WAL_DEFAULT" ? "WAL (기본) 완료!" :
-                                     "WAL (CP=0) 완료!";
-                    Console.Write(modeName.PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 2);
-                    Console.Write($"총 {total}회 완료".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 3);
-                    Console.Write($"총 시간: {elapsed:hh\\:mm\\:ss\\.fff}".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 4);
-                    Console.Write("___________________".PadRight(Console.WindowWidth - 1));
-                }
-                finally
-                {
-                    Console.CursorVisible = true;
-                }
-            }
-        }
-
         static void WriteWithMode(string dbPath, string mode, int totalRecords, int recordsPerTransaction, int updateInterval, int startLine, bool disableCheckpoint)
         {
             Stopwatch sw = Stopwatch.StartNew();
@@ -552,11 +389,11 @@ namespace Db_TestApp
                             cmd.CommandText = "PRAGMA synchronous=OFF;";
                             cmd.ExecuteNonQuery();
 
-                            if (disableCheckpoint)
-                            {
-                                cmd.CommandText = "PRAGMA wal_autocheckpoint=0;";
-                                cmd.ExecuteNonQuery();
-                            }
+                            //if (disableCheckpoint)
+                            //{
+                            //    cmd.CommandText = "PRAGMA wal_autocheckpoint=0;";
+                            //    cmd.ExecuteNonQuery();
+                            //}
                         }
                         else
                         {
