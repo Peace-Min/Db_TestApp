@@ -1,0 +1,3 @@
+﻿TimeStamp,RunIndex,TestType,Mode,TotalRecords,RecordsPerTx,DurationSeconds
+2025-12-11 16:16:24,1,Concurrency,Baseline,10000,100,0.384
+2025-12-11 16:16:24,1,Concurrency,Concurrent,10000,100,0.283

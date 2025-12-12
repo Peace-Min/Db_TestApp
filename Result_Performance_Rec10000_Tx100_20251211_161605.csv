@@ -1,0 +1,5 @@
+﻿TimeStamp,RunIndex,TestType,Mode,TotalRecords,RecordsPerTx,DurationSeconds
+2025-12-11 16:16:06,1,Performance,WAL,10000,100,0.360
+2025-12-11 16:16:06,1,Performance,MEMORY,10000,100,0.238
+2025-12-11 16:16:07,2,Performance,WAL,10000,100,0.382
+2025-12-11 16:16:07,2,Performance,MEMORY,10000,100,0.247

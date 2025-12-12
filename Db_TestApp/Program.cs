@@ -5,6 +5,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Text;
 
 namespace Db_TestApp
 {
@@ -14,9 +15,13 @@ namespace Db_TestApp
 
         static void Main(string[] args)
         {
+            Console.OutputEncoding = Encoding.UTF8;
             while (true)
             {
-                Console.Clear();
+                if (!Console.IsOutputRedirected)
+                {
+                    try { Console.Clear(); } catch { }
+                }
                 Console.WriteLine("=== SQLite 성능 테스트 프로그램 ===");
                 Console.WriteLine();
                 Console.WriteLine("1. WAL vs MEMORY 성능 비교 (단일 DB, 1000만 레코드)");
@@ -48,7 +53,7 @@ namespace Db_TestApp
 
         static void RunConcurrentReadWriteTest()
         {
-            Console.Clear();
+            if (!Console.IsOutputRedirected) try { Console.Clear(); } catch { }
             Console.WriteLine("=== WAL 동시성 테스트 (Write + Read 부하 검증) ===");
             Console.WriteLine("설명: Reader(단일 스레드) 유무에 따른 Write 소요 시간 비교");
             Console.WriteLine();
@@ -61,9 +66,9 @@ namespace Db_TestApp
             input = Console.ReadLine();
             int recordsPerTransaction = string.IsNullOrEmpty(input) ? 1 : int.Parse(input);
 
-            Console.Write("업데이트 간격 (기본 10000): ");
+            Console.Write("업데이트 간격 (기본 10): ");
             input = Console.ReadLine();
-            int updateInterval = string.IsNullOrEmpty(input) ? 10000 : int.Parse(input);
+            int updateInterval = string.IsNullOrEmpty(input) ? 10 : int.Parse(input);
 
             Console.WriteLine();
             Console.WriteLine($"설정: 총 {totalRecords:N0}개, 트랜잭션 당 {recordsPerTransaction:N0}개, 업데이트 {updateInterval:N0}개마다");
@@ -77,13 +82,16 @@ namespace Db_TestApp
             string dbPathBaseline = Path.Combine(testFolder, "baseline.db");
             string dbPathConcurrency = Path.Combine(testFolder, "concurrency.db");
 
-            int startLine = Console.CursorTop;
+            int startLine = 0;
+            if (!Console.IsOutputRedirected) try { startLine = Console.CursorTop; } catch { }
             Console.WriteLine("______________________________________________________");
 
             // 1. Baseline Test (Only Write)
             Console.WriteLine(">>> 1단계: Baseline 테스트 (Reader 없음) 시작...");
             Stopwatch sw1 = Stopwatch.StartNew();
-            WriteWithMode(dbPathBaseline, "WAL", totalRecords, recordsPerTransaction, updateInterval, startLine + 2, true);
+            WriteWithMode(dbPathBaseline, "WAL", totalRecords, recordsPerTransaction, updateInterval,
+                (count, elapsed) => UpdateConsole("WAL", count, totalRecords, elapsed, startLine + 2),
+                (elapsed) => UpdateConsoleFinal("WAL", totalRecords, elapsed, startLine + 2));
             sw1.Stop();
             Console.WriteLine($"\n>>> 1단계 완료. 소요 시간: {sw1.Elapsed.TotalSeconds:F3}초");
             Console.WriteLine("______________________________________________________");
@@ -105,50 +113,40 @@ namespace Db_TestApp
                 {
                     try { connection.Open(); } catch { return; }
 
-                    long previousCount = 0;
-                    while (!cts.Token.IsCancellationRequested)
+                    while (true)
                     {
                         try
                         {
                             using (var cmd = connection.CreateCommand())
                             {
-                                // 단순 COUNT(*) 조회
                                 cmd.CommandText = "SELECT COUNT(*) FROM Object_Table_0";
                                 var result = cmd.ExecuteScalar();
-                                long currentCount = result != null ? Convert.ToInt64(result) : 0;
 
-                                Interlocked.Exchange(ref totalReads, currentCount); // 조회된 레코드 수 업데이트
-                                Interlocked.Increment(ref queryCount); // 쿼리 시도 횟수 증가
+                                long currentCount = result == null || result == DBNull.Value
+                                    ? 0
+                                    : Convert.ToInt64(result);
 
-                                if (currentCount > previousCount)
-                                {
-                                    previousCount = currentCount;
+                                Interlocked.Exchange(ref totalReads, currentCount);
+                                Interlocked.Increment(ref queryCount);
 
-                                    // 마지막 s_time 조회
-                                    cmd.CommandText = "SELECT MAX(s_time) FROM Object_Table_0";
-                                    var timeResult = cmd.ExecuteScalar();
-                                    if (timeResult != null && timeResult != DBNull.Value)
-                                    {
-                                        lastReadTime = Convert.ToDouble(timeResult);
-                                    }
-                                }
-
-                                // 모든 데이터를 읽었으면 종료
+                                // 🔥 모든 데이터를 읽었으면 Reader 종료
                                 if (currentCount >= totalRecords)
-                                {
                                     break;
-                                }
                             }
-                            // Checkpoint 부하 테스트를 위해 Sleep 제거 (Continuous Read)
-                            Thread.Sleep(1); 
                         }
-                        catch { /* 무시 */ }
+                        catch
+                        {
+                            // 테이블 미생성 또는 WRITER 잠금 등 발생 가능 → 잠깐 대기 후 재시도
+                        }
+
+                        Thread.Sleep(1);
                     }
                 }
             });
 
             // Writer 시작 (Write + Read 정보 동시 표시)
-            int displayStartLine = Console.CursorTop;
+            int displayStartLine = 0;
+            if (!Console.IsOutputRedirected) try { displayStartLine = Console.CursorTop; } catch { }
             Console.WriteLine("___________________");
             Console.WriteLine("WAL 모드 진행중 ~~");
             Console.WriteLine("Write - 쓴 개수: 0 / 0");
@@ -169,9 +167,9 @@ namespace Db_TestApp
                 {
                     cmd.CommandText = "PRAGMA journal_mode=WAL;";
                     cmd.ExecuteNonQuery();
-                    cmd.CommandText = "PRAGMA wal_autocheckpoint=0;";
+                    //cmd.CommandText = "PRAGMA wal_autocheckpoint=0;";
                     cmd.ExecuteNonQuery();
-                    cmd.CommandText = "PRAGMA synchronous=NORMAL;";
+                    cmd.CommandText = "PRAGMA synchronous=OFF;";
                     cmd.ExecuteNonQuery();
                 }
 
@@ -264,7 +262,7 @@ namespace Db_TestApp
                             }
                             catch { }
 
-                            Console.SetCursorPosition(0, displayStartLine + 2);
+                            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 2); } catch { }
                             Console.WriteLine($"Write - 쓴 개수: {recordsWritten:N0} / {totalRecords:N0}".PadRight(60));
                             Console.WriteLine($"Write - 진행시간: {sw2.Elapsed:hh\\:mm\\:ss\\.fff} (WAL 크기: {currentWalSize / 1024.0:F1} KB)".PadRight(60));
                             Console.WriteLine($"Read  - 조회된 행: {totalReads:N0} (시도: {Interlocked.Read(ref queryCount):N0}회)".PadRight(60));
@@ -276,12 +274,33 @@ namespace Db_TestApp
 
             sw2.Stop();
 
-            // 테스트 종료 후 Reader 중단
-            cts.Cancel();
-            swReader.Stop();
-            try { readerTask.Wait(); } catch { }
+            // Reader가 완료될 때까지 콘솔 업데이트 계속 수행 (Write가 먼저 끝나도 Read 현황 갱신)
+            while (!readerTask.IsCompleted)
+            {
+                long currentWalSize = 0;
+                try
+                {
+                    string walPath = dbPathConcurrency + "-wal";
+                    if (File.Exists(walPath)) currentWalSize = new FileInfo(walPath).Length;
+                }
+                catch { }
 
-            Console.SetCursorPosition(0, displayStartLine + 7);
+                if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 2); } catch { }
+                Console.WriteLine($"Write - 쓴 개수: {totalRecords:N0} / {totalRecords:N0}".PadRight(60));
+                Console.WriteLine($"Write - 진행시간: {sw2.Elapsed:hh\\:mm\\:ss\\.fff} (WAL 크기: {currentWalSize / 1024.0:F1} KB)".PadRight(60));
+                Console.WriteLine($"Read  - 조회된 행: {Interlocked.Read(ref totalReads):N0} (시도: {Interlocked.Read(ref queryCount):N0}회)".PadRight(60));
+                Console.WriteLine($"Read  - 진행시간: {swReader.Elapsed:hh\\:mm\\:ss\\.fff}".PadRight(60));
+
+                Thread.Sleep(50);
+            }
+
+            readerTask.Wait();
+            swReader.Stop();
+
+            //swReader.Stop();
+            //try { readerTask.Wait(); } catch { }
+
+            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 7); } catch { }
             Console.WriteLine(">>> 2단계 완료.");
             Console.WriteLine($"    Write 소요 시간: {sw2.Elapsed.TotalSeconds:F3}초");
             Console.WriteLine($"    Read 작업 시간: {swReader.Elapsed.TotalSeconds:F3}초 (총 {Interlocked.Read(ref queryCount):N0}회 시도)");
@@ -310,7 +329,7 @@ namespace Db_TestApp
 
         static void RunPerformanceTest()
         {
-            Console.Clear();
+            if (!Console.IsOutputRedirected) try { Console.Clear(); } catch { }
             Console.WriteLine("=== WAL vs MEMORY 성능 비교 ===");
             Console.WriteLine();
             Console.Write("총 레코드 수 (기본 10000000): ");
@@ -321,9 +340,9 @@ namespace Db_TestApp
             input = Console.ReadLine();
             int recordsPerTransaction = string.IsNullOrEmpty(input) ? 1 : int.Parse(input);
 
-            Console.Write("업데이트 간격 (기본 10000): ");
+            Console.Write("업데이트 간격 (기본 10): ");
             input = Console.ReadLine();
-            int updateInterval = string.IsNullOrEmpty(input) ? 10000 : int.Parse(input);
+            int updateInterval = string.IsNullOrEmpty(input) ? 10 : int.Parse(input);
 
             Console.WriteLine();
             Console.WriteLine($"설정: 총 {totalRecords:N0}개, 트랜잭션 당 {recordsPerTransaction:N0}개, 업데이트 {updateInterval:N0}개마다");
@@ -337,7 +356,8 @@ namespace Db_TestApp
             string walDbPath = Path.Combine(testFolder, "wal.db");
             string memoryDbPath = Path.Combine(testFolder, "memory.db");
 
-            int walStartLine = Console.CursorTop;
+            int walStartLine = 0;
+            if (!Console.IsOutputRedirected) try { walStartLine = Console.CursorTop; } catch { }
             Console.WriteLine("___________________");
             Console.WriteLine("WAL 모드 준비중...");
             Console.WriteLine("쓴 개수: 0");
@@ -345,7 +365,8 @@ namespace Db_TestApp
             Console.WriteLine("___________________");
             Console.WriteLine();
 
-            int memoryStartLine = Console.CursorTop;
+            int memoryStartLine = 0;
+            if (!Console.IsOutputRedirected) try { memoryStartLine = Console.CursorTop; } catch { }
             Console.WriteLine("___________________");
             Console.WriteLine("Memory 모드 준비중...");
             Console.WriteLine("쓴 개수: 0");
@@ -353,19 +374,26 @@ namespace Db_TestApp
             Console.WriteLine("___________________");
             Console.WriteLine();
 
-            Task walTask = Task.Run(() => WriteWithMode(walDbPath, "WAL", totalRecords, recordsPerTransaction, updateInterval, walStartLine, false));
-            Task memoryTask = Task.Run(() => WriteWithMode(memoryDbPath, "MEMORY", totalRecords, recordsPerTransaction, updateInterval, memoryStartLine, false));
+            Task walTask = Task.Run(() => WriteWithMode(walDbPath, "WAL", totalRecords, recordsPerTransaction, updateInterval,
+                (count, elapsed) => UpdateConsole("WAL", count, totalRecords, elapsed, walStartLine),
+                (elapsed) => UpdateConsoleFinal("WAL", totalRecords, elapsed, walStartLine)));
+            
+            Task.WaitAll(walTask);
 
-            Task.WaitAll(walTask, memoryTask);
+            Task memoryTask = Task.Run(() => WriteWithMode(memoryDbPath, "MEMORY", totalRecords, recordsPerTransaction, updateInterval,
+                (count, elapsed) => UpdateConsole("MEMORY", count, totalRecords, elapsed, memoryStartLine),
+                (elapsed) => UpdateConsoleFinal("MEMORY", totalRecords, elapsed, memoryStartLine)));
 
-            Console.SetCursorPosition(0, memoryStartLine + 6);
+            Task.WaitAll(memoryTask);
+
+            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, memoryStartLine + 6); } catch { }
             Console.WriteLine();
             Console.WriteLine("=== 테스트 완료 ===");
             Console.WriteLine("엔터키를 누르면 메뉴로 돌아갑니다...");
             Console.ReadLine();
         }
 
-        static void WriteWithMode(string dbPath, string mode, int totalRecords, int recordsPerTransaction, int updateInterval, int startLine, bool disableCheckpoint)
+        static void WriteWithMode(string dbPath, string mode, int totalRecords, int recordsPerTransaction, int updateInterval, Action<int, TimeSpan> onProgress, Action<TimeSpan> onComplete)
         {
             Stopwatch sw = Stopwatch.StartNew();
             // ✅ Pooling=False: 연결 풀링 비활성화 -> 매번 물리적 파일 생성/닫기 강제
@@ -380,30 +408,22 @@ namespace Db_TestApp
 
                     using (var cmd = connection.CreateCommand())
                     {
-                        if (mode.Contains("WAL")) // "WAL", "WAL_DEFAULT", "WAL_NO_CHECKPOINT" 모두 처리
+                        if (mode.Contains("WAL"))
                         {
                             cmd.CommandText = "PRAGMA journal_mode=WAL;";
                             cmd.ExecuteNonQuery();
-
-                            //// 실제 환경(Db_WriteApp)과 동일하게 WAL은 NORMAL 모드 사용 (안전성 확보)
-                            cmd.CommandText = "PRAGMA synchronous=OFF;";
-                            cmd.ExecuteNonQuery();
-
-                            //if (disableCheckpoint)
-                            //{
-                            //    cmd.CommandText = "PRAGMA wal_autocheckpoint=0;";
-                            //    cmd.ExecuteNonQuery();
-                            //}
                         }
                         else
                         {
                             cmd.CommandText = "PRAGMA journal_mode=MEMORY;";
                             cmd.ExecuteNonQuery();
-
-                            // 실제 환경(Legacy)과 동일하게 MEMORY는 OFF 모드 사용 (속도 최유선)
-                            cmd.CommandText = "PRAGMA synchronous=OFF;";
-                            cmd.ExecuteNonQuery();
                         }
+
+                        // 모든 모드에서 Synchronous OFF (속도 최적화)
+                        cmd.CommandText = "PRAGMA synchronous=OFF;";
+                        cmd.ExecuteNonQuery();
+
+                        // Checkpoint는 기본값 사용 (Auto Checkpoint 1000)
                     }
 
                     // 테이블 3개 생성 (실제 데이터 구조 반영)
@@ -487,56 +507,42 @@ namespace Db_TestApp
 
                             writtenCount += recordsPerTransaction;
 
-                            if (startLine >= 0 && (writtenCount % updateInterval == 0 || writtenCount == totalRecords))
+                            if (writtenCount % updateInterval == 0 || writtenCount == totalRecords)
                             {
-                                UpdateConsole(mode, writtenCount, totalRecords, sw.Elapsed, startLine);
+                                onProgress?.Invoke(writtenCount, sw.Elapsed);
                             }
                         }
                     }
 
-                    if (startLine >= 0)
-                    {
-                        UpdateConsoleFinal(mode, totalRecords, sw.Elapsed, startLine);
-                    }
+                    onComplete?.Invoke(sw.Elapsed);
                 }
 
                 sw.Stop();
             }
             catch (Exception ex)
             {
-                if (startLine >= 0)
-                {
-                    lock (consoleLock)
-                    {
-                        Console.SetCursorPosition(0, startLine + 1);
-                        Console.WriteLine($"{mode} 모드 오류: {ex.Message}".PadRight(Console.WindowWidth - 1));
-                    }
-                }
+                Console.WriteLine($"{mode} 모드 오류: {ex.Message}");
             }
         }
 
         static void UpdateConsole(string mode, int count, int total, TimeSpan elapsed, int startLine)
         {
-            lock (consoleLock)
+            lock (consoleLock) // 멀티스레드 환경(Option 1)에서 콘솔 깨짐 방지를 위해 lock 필수
             {
-                try
+                if (!Console.IsOutputRedirected) 
                 {
-                    Console.CursorVisible = false;
-                    Console.SetCursorPosition(0, startLine);
-                    Console.Write("___________________".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 1);
-                    Console.Write($"{mode} 모드 진행중 ~~".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 2);
-                    Console.Write($"쓴 개수: {count:N0} / {total:N0}".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 3);
-                    Console.Write($"진행시간: {elapsed:hh\\:mm\\:ss\\.ffffff}".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 4);
-                    Console.Write("___________________".PadRight(Console.WindowWidth - 1));
+                    try 
+                    {
+                        Console.SetCursorPosition(0, startLine);
+                    } 
+                    catch { }
                 }
-                finally
-                {
-                    Console.CursorVisible = true;
-                }
+                
+                Console.WriteLine("___________________".PadRight(60));
+                Console.WriteLine($"{mode} 모드 진행중 ~~".PadRight(60));
+                Console.WriteLine($"쓴 개수: {count:N0} / {total:N0}".PadRight(60));
+                Console.WriteLine($"진행시간: {elapsed:hh\\:mm\\:ss\\.ffffff}".PadRight(60));
+                Console.WriteLine("___________________".PadRight(60));
             }
         }
 
@@ -544,23 +550,22 @@ namespace Db_TestApp
         {
             lock (consoleLock)
             {
-                try
+                // try
                 {
-                    Console.CursorVisible = false;
-                    Console.SetCursorPosition(0, startLine);
-                    Console.Write("___________________".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 1);
-                    Console.Write($"{mode} 모드 완료!".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 2);
-                    Console.Write($"총 개수: {total:N0}".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 3);
-                    Console.Write($"총 시간: {elapsed:hh\\:mm\\:ss\\.fff}".PadRight(Console.WindowWidth - 1));
-                    Console.SetCursorPosition(0, startLine + 4);
-                    Console.Write("___________________".PadRight(Console.WindowWidth - 1));
+                    // Console.CursorVisible = false;
+                    if (!Console.IsOutputRedirected)
+                    {
+                        try { Console.SetCursorPosition(0, startLine); } catch { }
+                    }
+                    Console.WriteLine("___________________".PadRight(60));
+                    Console.WriteLine($"{mode} 모드 완료!".PadRight(60));
+                    Console.WriteLine($"총 개수: {total:N0}".PadRight(60));
+                    Console.WriteLine($"총 시간: {elapsed:hh\\:mm\\:ss\\.fff}".PadRight(60));
+                    Console.WriteLine("___________________".PadRight(60));
                 }
-                finally
+                // finally
                 {
-                    Console.CursorVisible = true;
+                    // Console.CursorVisible = true;
                 }
             }
         }

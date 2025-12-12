@@ -1,0 +1,19 @@
+﻿TimeStamp,RunIndex,TestType,Mode,TotalRecords,RecordsPerTx,DurationSeconds
+2025-12-11 16:01:52,1,Performance,WAL,1000,100,0.000
+2025-12-11 16:01:52,1,Performance,MEMORY,1000,100,0.000
+2025-12-11 16:01:53,1,Concurrency,Baseline,1000,100,0.118
+2025-12-11 16:01:53,1,Concurrency,Concurrent,1000,100,0.039
+2025-12-11 16:02:27,1,Performance,WAL,10000,100,0.000
+2025-12-11 16:02:27,1,Performance,MEMORY,10000,100,0.000
+2025-12-11 16:02:28,1,Concurrency,Baseline,10000,100,0.441
+2025-12-11 16:02:28,1,Concurrency,Concurrent,10000,100,0.339
+2025-12-11 16:04:59,1,Performance,WAL,10000,100,0.423
+2025-12-11 16:04:59,1,Performance,MEMORY,10000,100,0.319
+2025-12-11 16:05:00,1,Concurrency,Baseline,10000,100,0.414
+2025-12-11 16:05:00,1,Concurrency,Concurrent,10000,100,0.343
+2025-12-11 16:09:42,1,Performance,WAL,10000,100,0.386
+2025-12-11 16:09:42,1,Performance,MEMORY,10000,100,0.239
+2025-12-11 16:09:43,2,Performance,WAL,10000,100,0.368
+2025-12-11 16:09:43,2,Performance,MEMORY,10000,100,0.245
+2025-12-11 16:10:12,1,Concurrency,Baseline,10000,100,0.382
+2025-12-11 16:10:12,1,Concurrency,Concurrent,10000,100,0.271
