@@ -101,18 +101,45 @@ namespace Db_TestApp
 
             CancellationTokenSource cts = new CancellationTokenSource();
             long totalReads = 0;
-            double lastReadTime = 0;
 
             // Reader Task (1개 고정)
-            Stopwatch swReader = Stopwatch.StartNew();
+            Stopwatch swReader = Stopwatch.StartNew(); // Reader Task 시작과 동시에 측정
             long queryCount = 0; // 실제 쿼리 시도 횟수
 
             Task readerTask = Task.Run(() =>
             {
-                using (var connection = new SQLiteConnection($"Data Source={dbPathConcurrency};Version=3;Pooling=False;Read Only=True;"))
-                {
-                    try { connection.Open(); } catch { return; }
+                // DB와 테이블이 생성될 때까지 대기
+                SQLiteConnection connection = null;
+                bool connected = false;
 
+                while (!connected)
+                {
+                    try
+                    {
+                        connection = new SQLiteConnection($"Data Source={dbPathConcurrency};Version=3;Pooling=False;Read Only=True;");
+                        connection.Open();
+
+                        // 테이블 존재 여부 확인
+                        using (var cmd = connection.CreateCommand())
+                        {
+                            cmd.CommandText = "SELECT COUNT(*) FROM Object_Table_0";
+                            cmd.ExecuteScalar(); // 테이블이 없으면 예외 발생
+                        }
+
+                        connected = true; // 연결 및 테이블 확인 성공
+                    }
+                    catch
+                    {
+                        // DB 파일이나 테이블이 아직 생성되지 않음 → 재시도
+                        connection?.Dispose();
+                        connection = null;
+                        Thread.Sleep(1); // 1ms 대기 후 재시도
+                    }
+                }
+
+                // 연결 성공 후 읽기 작업 수행
+                using (connection)
+                {
                     while (true)
                     {
                         try
@@ -129,14 +156,18 @@ namespace Db_TestApp
                                 Interlocked.Exchange(ref totalReads, currentCount);
                                 Interlocked.Increment(ref queryCount);
 
-                                // 🔥 모든 데이터를 읽었으면 Reader 종료
+                                // 🔥 모든 데이터를 읽었으면 Reader 종료 (1000개 기록 후 종료)
                                 if (currentCount >= totalRecords)
+                                {
+                                    // 마지막 조회 결과를 화면에 반영할 시간을 주기 위해 잠깐 대기
+                                    Thread.Sleep(10);
                                     break;
+                                }
                             }
                         }
                         catch
                         {
-                            // 테이블 미생성 또는 WRITER 잠금 등 발생 가능 → 잠깐 대기 후 재시도
+                            // WRITER 잠금 등 발생 가능 → 잠깐 대기 후 재시도
                         }
 
                         Thread.Sleep(1);
@@ -297,9 +328,6 @@ namespace Db_TestApp
             readerTask.Wait();
             swReader.Stop();
 
-            //swReader.Stop();
-            //try { readerTask.Wait(); } catch { }
-
             if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 7); } catch { }
             Console.WriteLine(">>> 2단계 완료.");
             Console.WriteLine($"    Write 소요 시간: {sw2.Elapsed.TotalSeconds:F3}초");
@@ -377,7 +405,7 @@ namespace Db_TestApp
             Task walTask = Task.Run(() => WriteWithMode(walDbPath, "WAL", totalRecords, recordsPerTransaction, updateInterval,
                 (count, elapsed) => UpdateConsole("WAL", count, totalRecords, elapsed, walStartLine),
                 (elapsed) => UpdateConsoleFinal("WAL", totalRecords, elapsed, walStartLine)));
-            
+
             Task.WaitAll(walTask);
 
             Task memoryTask = Task.Run(() => WriteWithMode(memoryDbPath, "MEMORY", totalRecords, recordsPerTransaction, updateInterval,
@@ -529,15 +557,15 @@ namespace Db_TestApp
         {
             lock (consoleLock) // 멀티스레드 환경(Option 1)에서 콘솔 깨짐 방지를 위해 lock 필수
             {
-                if (!Console.IsOutputRedirected) 
+                if (!Console.IsOutputRedirected)
                 {
-                    try 
+                    try
                     {
                         Console.SetCursorPosition(0, startLine);
-                    } 
+                    }
                     catch { }
                 }
-                
+
                 Console.WriteLine("___________________".PadRight(60));
                 Console.WriteLine($"{mode} 모드 진행중 ~~".PadRight(60));
                 Console.WriteLine($"쓴 개수: {count:N0} / {total:N0}".PadRight(60));
