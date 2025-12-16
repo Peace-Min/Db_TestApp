@@ -26,7 +26,7 @@ namespace Db_TestApp
                 Console.WriteLine();
                 Console.WriteLine("1. WAL vs MEMORY 성능 비교 (단일 DB, 1000만 레코드)");
                 Console.WriteLine("2. WAL 동시성 테스트 (Write + Read 부하 검증)");
-                //Console.WriteLine("3. 몬테카를로 시뮬레이션 (100회, DB 매번 생성)");
+                Console.WriteLine("3. 분할 실행 시뮬레이션 (WAL 파일 생성 오버헤드 확인)");
                 Console.WriteLine("0. 종료");
                 Console.WriteLine();
                 Console.Write("선택: ");
@@ -40,6 +40,9 @@ namespace Db_TestApp
                         break;
                     case "2":
                         RunConcurrentReadWriteTest();
+                        break;
+                    case "3":
+                        RunSplitSimulationTest();
                         break;
                     case "0":
                         return;
@@ -421,11 +424,111 @@ namespace Db_TestApp
             Console.ReadLine();
         }
 
+        static void RunSplitSimulationTest()
+        {
+            if (!Console.IsOutputRedirected) try { Console.Clear(); } catch { }
+            Console.WriteLine("=== 분할 실행 시뮬레이션 (WAL 파일 생성 부하 확인) ===");
+            Console.WriteLine();
+            Console.Write("총 레코드 수 (기본 2000000): ");
+            string input = Console.ReadLine();
+            int totalRecords = string.IsNullOrEmpty(input) ? 2_000_000 : int.Parse(input);
+
+            Console.Write("트랜잭션 당 레코드 수 (기본 1): ");
+            input = Console.ReadLine();
+            int recordsPerTransaction = string.IsNullOrEmpty(input) ? 1 : int.Parse(input);
+
+            Console.Write("화면 디스플레이 업데이트 (기본 1000): ");
+            input = Console.ReadLine();
+            int updateInterval = string.IsNullOrEmpty(input) ? 1000 : int.Parse(input);
+
+            Console.Write("분할 실행 횟수 (기본 100): ");
+            input = Console.ReadLine();
+            int splitCount = string.IsNullOrEmpty(input) ? 100 : int.Parse(input);
+
+            Console.WriteLine();
+            Console.WriteLine($"설정: 총 {totalRecords:N0}개, 분할 {splitCount:N0}회 (DB당 {totalRecords / splitCount:N0}개), 트랜잭션 당 {recordsPerTransaction:N0}개");
+            Console.WriteLine();
+
+            // Test3_Split 폴더에 DB 파일 생성
+            string testFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Test3_Split");
+            if (Directory.Exists(testFolder)) Directory.Delete(testFolder, true);
+            Directory.CreateDirectory(testFolder);
+
+            int walStartLine = 0;
+            if (!Console.IsOutputRedirected) try { walStartLine = Console.CursorTop; } catch { }
+            Console.WriteLine("___________________");
+            Console.WriteLine("WAL 모드 준비중...");
+            Console.WriteLine("쓴 개수: 0");
+            Console.WriteLine("진행시간: 00:00:00");
+            Console.WriteLine("___________________");
+            Console.WriteLine();
+
+            int memoryStartLine = 0;
+            if (!Console.IsOutputRedirected) try { memoryStartLine = Console.CursorTop; } catch { }
+            Console.WriteLine("___________________");
+            Console.WriteLine("Memory 모드 준비중...");
+            Console.WriteLine("쓴 개수: 0");
+            Console.WriteLine("진행시간: 00:00:00");
+            Console.WriteLine("___________________");
+            Console.WriteLine();
+
+            int recordsPerSplit = totalRecords / splitCount;
+
+            // WAL 분할 실행
+            Task walTask = Task.Run(() =>
+            {
+                Stopwatch swTotal = Stopwatch.StartNew();
+                for (int i = 0; i < splitCount; i++)
+                {
+                    string currentDbPath = Path.Combine(testFolder, $"wal_{i}.db");
+                    int capturedIndex = i;
+                    WriteWithMode(currentDbPath, "WAL", recordsPerSplit, recordsPerTransaction, updateInterval,
+                        (count, elapsed) => UpdateConsole("WAL", (capturedIndex * recordsPerSplit) + count, totalRecords, swTotal.Elapsed, walStartLine),
+                        null);
+                }
+                swTotal.Stop();
+                UpdateConsoleFinal("WAL", totalRecords, swTotal.Elapsed, walStartLine);
+            });
+
+            Task.WaitAll(walTask);
+
+            // Memory 분할 실행
+            Task memoryTask = Task.Run(() =>
+            {
+                Stopwatch swTotal = Stopwatch.StartNew();
+                for (int i = 0; i < splitCount; i++)
+                {
+                    string currentDbPath = Path.Combine(testFolder, $"memory_{i}.db");
+                    int capturedIndex = i;
+                    WriteWithMode(currentDbPath, "MEMORY", recordsPerSplit, recordsPerTransaction, updateInterval,
+                        (count, elapsed) => UpdateConsole("MEMORY", (capturedIndex * recordsPerSplit) + count, totalRecords, swTotal.Elapsed, memoryStartLine),
+                        null);
+                }
+                swTotal.Stop();
+                UpdateConsoleFinal("MEMORY", totalRecords, swTotal.Elapsed, memoryStartLine);
+            });
+
+            Task.WaitAll(memoryTask);
+
+            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, memoryStartLine + 6); } catch { }
+            Console.WriteLine();
+            Console.WriteLine("=== 테스트 완료 ===");
+            Console.WriteLine("엔터키를 누르면 메뉴로 돌아갑니다...");
+            Console.ReadLine();
+        }
+
         static void WriteWithMode(string dbPath, string mode, int totalRecords, int recordsPerTransaction, int updateInterval, Action<int, TimeSpan> onProgress, Action<TimeSpan> onComplete)
         {
             Stopwatch sw = Stopwatch.StartNew();
             // ✅ Pooling=False: 연결 풀링 비활성화 -> 매번 물리적 파일 생성/닫기 강제
             string connectionString = $"Data Source={dbPath};Version=3;Pooling=False;";
+
+            // DB에 쓸 총 레코드 수보다 트랜잭션 당 레코드 수가 크면 조정 (안 그러면 0번 수행됨)
+            if (recordsPerTransaction > totalRecords)
+            {
+                recordsPerTransaction = totalRecords;
+            }
+            if (recordsPerTransaction <= 0) recordsPerTransaction = 1;
 
             try
             {
