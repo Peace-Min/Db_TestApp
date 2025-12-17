@@ -44,6 +44,9 @@ namespace Db_TestApp
                     case "3":
                         RunSplitSimulationTest();
                         break;
+                    case "4":
+                        RunConcurrentReadWriteTest(true);
+                        break;
                     case "0":
                         return;
                     default:
@@ -54,10 +57,18 @@ namespace Db_TestApp
             }
         }
 
-        static void RunConcurrentReadWriteTest()
+        static void RunConcurrentReadWriteTest(bool isNotUsedCheckPoint = false)
         {
             if (!Console.IsOutputRedirected) try { Console.Clear(); } catch { }
-            Console.WriteLine("=== WAL 동시성 테스트 (Write + Read 부하 검증) ===");
+
+            if (isNotUsedCheckPoint)
+            {
+                Console.WriteLine("=== WAL 동시성 테스트 (Write + Read 부하 검증, CheckPoint 비활성화) ===");
+            }
+            else
+            {
+                Console.WriteLine("=== WAL 동시성 테스트 (Write + Read 부하 검증) ===");
+            }
             Console.WriteLine("설명: Reader(단일 스레드) 유무에 따른 Write 소요 시간 비교");
             Console.WriteLine();
 
@@ -141,6 +152,7 @@ namespace Db_TestApp
                 }
 
                 // 연결 성공 후 읽기 작업 수행
+                // 연결 성공 후 읽기 작업 수행
                 using (connection)
                 {
                     while (true)
@@ -159,7 +171,7 @@ namespace Db_TestApp
                                 Interlocked.Exchange(ref totalReads, currentCount);
                                 Interlocked.Increment(ref queryCount);
 
-                                // 🔥 모든 데이터를 읽었으면 Reader 종료 (1000개 기록 후 종료)
+                                // 🔥 모든 데이터를 읽었으면 Reader 종료
                                 if (currentCount >= totalRecords)
                                 {
                                     // 마지막 조회 결과를 화면에 반영할 시간을 주기 위해 잠깐 대기
@@ -173,6 +185,7 @@ namespace Db_TestApp
                             // WRITER 잠금 등 발생 가능 → 잠깐 대기 후 재시도
                         }
 
+                        // Reader 너무 빠르면 안되니까 살짝 쉼 (Checkpoint 유도)
                         Thread.Sleep(1);
                     }
                 }
@@ -192,7 +205,7 @@ namespace Db_TestApp
             Stopwatch sw2 = Stopwatch.StartNew();
 
             // Write 작업 수행
-            string connectionString = $"Data Source={dbPathConcurrency};Version=3;Pooling=False;";
+            string connectionString = $"Data Source={dbPathConcurrency};Version=3;Pooling=True;";
             using (var connection = new SQLiteConnection(connectionString))
             {
                 connection.Open();
@@ -201,8 +214,11 @@ namespace Db_TestApp
                 {
                     cmd.CommandText = "PRAGMA journal_mode=WAL;";
                     cmd.ExecuteNonQuery();
-                    //cmd.CommandText = "PRAGMA wal_autocheckpoint=0;";
-                    cmd.ExecuteNonQuery();
+                    if (isNotUsedCheckPoint)
+                    {
+                        cmd.CommandText = "PRAGMA wal_autocheckpoint=0;";
+                        cmd.ExecuteNonQuery();
+                    }
                     cmd.CommandText = "PRAGMA synchronous=OFF;";
                     cmd.ExecuteNonQuery();
                 }
@@ -330,6 +346,15 @@ namespace Db_TestApp
 
             readerTask.Wait();
             swReader.Stop();
+
+            // 🔥 Reader 최종 결과 강제 갱신 (화면에 100만 개가 찍히도록 보장)
+            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 2); } catch { }
+            Console.WriteLine($"Write - 쓴 개수: {totalRecords:N0} / {totalRecords:N0}".PadRight(60));
+            Console.WriteLine($"Write - 진행시간: {sw2.Elapsed:hh\\:mm\\:ss\\.fff} (완료)       ".PadRight(60));
+            Console.WriteLine($"Read  - 조회된 행: {Interlocked.Read(ref totalReads):N0}".PadRight(60));
+            Console.WriteLine($"Read  - 진행시간: {swReader.Elapsed:hh\\:mm\\:ss\\.fff}".PadRight(60));
+
+            Console.WriteLine();
 
             if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 7); } catch { }
             Console.WriteLine(">>> 2단계 완료.");

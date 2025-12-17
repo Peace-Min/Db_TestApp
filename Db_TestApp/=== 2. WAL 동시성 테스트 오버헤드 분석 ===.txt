@@ -1,0 +1,28 @@
+[WAL 동시성 테스트 오버헤드 분석 결과]
+
+1. 현상 (Observation)
+   - Baseline (Writer Only): 약 230초 소요
+   - Concurrent (Writer + Reader): 약 280초 소요 (약 21.7% 오버헤드 발생)
+   - 특이사항: Concurrent 테스트 시 WAL 파일 크기가 145MB 이상으로 비정상적 증가
+
+2. 원인 분석 (Root Cause)
+   - 핵심 원인은 "단순 CPU/Memory 경합"이 아닌 "Checkpoint 블로킹으로 인한 WAL 비대화"입니다.
+
+   A. Checkpoint 차단 (Blocking)
+      - SQLite의 WAL 모드는 주기적으로 WAL 파일의 내용을 원본 DB로 옮기고 WAL을 비워야(Truncate/Reset) 성능이 유지됩니다.
+      - 그러나 Reader가 쉬지 않고 `SELECT COUNT(*)`(Read Transaction)를 수행하고 있어, SQLite는 데이터 일관성을 위해 Checkpoint를 수행하지 못합니다. (Checkpoint는 모든 Reader가 끝날 때까지 대기함)
+
+   B. WAL 파일 비대화 (WAL Loop)
+      - Checkpoint가 막히니, Writer는 기존 WAL 공간을 재사용하지 못하고 계속 파일 뒤에 데이터를 붙여(Append) 나갑니다.
+      - 결과적으로 WAL 파일이 수백 MB 단위로 커집니다. (로그상 145,415 KB 확인)
+
+   C. 관리 비용 증가 (Management Overhead)
+      - WAL 파일이 커지면, 데이터 위치를 찾는 'WAL-Index (Hash Table)' 조회 비용이 증가합니다.
+      - Writer는 매번 데이터를 쓸 때마다 더 커진 인덱스를 관리하고, 더 먼 디스크 오프셋에 접근해야 하므로 쓰기 속도가 점진적으로 느려집니다.
+
+3. 결론 (Conclusion)
+   - "CPU를 나눠 써서 느려졌다" (X) -> 부차적인 이유
+   - "Reader가 청소를 못하게 막아서 쓰레기(WAL)가 쌓였고, 그 더미 속에서 작업하느라 느려졌다" (O) -> 주된 이유
+
+4. 참고 (Reference)
+   - 만약 Reader가 가끔씩 쉬어주거나(Sleep), 트랜잭션을 짧게 끊었다면 Checkpoint가 성공하여 오버헤드가 거의 없었을 것입니다.
