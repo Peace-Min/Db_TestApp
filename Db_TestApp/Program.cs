@@ -185,8 +185,9 @@ namespace Db_TestApp
                             // WRITER 잠금 등 발생 가능 → 잠깐 대기 후 재시도
                         }
 
-                        // Reader 너무 빠르면 안되니까 살짝 쉼 (Checkpoint 유도)
-                        Thread.Sleep(1);
+                        // Reader 빈도를 낮춰서 Writer가 Checkpoint를 수행할 여유(Gap)를 줌
+                        // 1ms 쉬는 것만으로도 Checkpoint 성공률이 비약적으로 상승함
+                        Thread.Sleep(5);
                     }
                 }
             });
