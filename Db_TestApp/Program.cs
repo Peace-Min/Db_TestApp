@@ -24,7 +24,7 @@ namespace Db_TestApp
                 }
                 Console.WriteLine("=== SQLite 성능 테스트 프로그램 ===");
                 Console.WriteLine();
-                Console.WriteLine("1. WAL vs MEMORY 성능 비교 (단일 DB, 1000만 레코드)");
+                Console.WriteLine("1. WAL vs Default 성능 비교 (단일 DB, 1000만 레코드)");
                 Console.WriteLine("2. WAL 동시성 테스트 (Write + Read 부하 검증)");
                 Console.WriteLine("3. 분할 실행 시뮬레이션 (WAL 파일 생성 오버헤드 확인)");
                 Console.WriteLine("0. 종료");
@@ -71,7 +71,7 @@ namespace Db_TestApp
 
             Console.Write("업데이트 간격 (기본 10): ");
             input = Console.ReadLine();
-            int updateInterval = string.IsNullOrEmpty(input) ? 10 : int.Parse(input);
+            int updateInterval = recordsPerTransaction >= 10000 ? recordsPerTransaction : recordsPerTransaction * 10;
 
             Console.WriteLine();
             Console.WriteLine($"설정: 총 {totalRecords:N0}개, 트랜잭션 당 {recordsPerTransaction:N0}개, 업데이트 {updateInterval:N0}개마다");
@@ -361,7 +361,7 @@ namespace Db_TestApp
         static void RunPerformanceTest()
         {
             if (!Console.IsOutputRedirected) try { Console.Clear(); } catch { }
-            Console.WriteLine("=== WAL vs MEMORY 성능 비교 ===");
+            Console.WriteLine("=== WAL vs Default 성능 비교 ===");
             Console.WriteLine();
             Console.Write("총 레코드 수 (기본 10000000): ");
             string input = Console.ReadLine();
@@ -371,9 +371,10 @@ namespace Db_TestApp
             input = Console.ReadLine();
             int recordsPerTransaction = string.IsNullOrEmpty(input) ? 1 : int.Parse(input);
 
-            Console.Write("업데이트 간격 (기본 10): ");
-            input = Console.ReadLine();
-            int updateInterval = string.IsNullOrEmpty(input) ? 10 : int.Parse(input);
+            //Console.Write("업데이트 간격 (기본 10): ");
+            //input = Console.ReadLine();
+            //int updateInterval = recordsPerTransaction >= 10000 ? recordsPerTransaction : recordsPerTransaction * 10;
+            int updateInterval = recordsPerTransaction >= 10000 ? recordsPerTransaction : recordsPerTransaction * 10;
 
             Console.WriteLine();
             Console.WriteLine($"설정: 총 {totalRecords:N0}개, 트랜잭션 당 {recordsPerTransaction:N0}개, 업데이트 {updateInterval:N0}개마다");
@@ -385,7 +386,7 @@ namespace Db_TestApp
             Directory.CreateDirectory(testFolder);
 
             string walDbPath = Path.Combine(testFolder, "wal.db");
-            string memoryDbPath = Path.Combine(testFolder, "memory.db");
+            string DefaultDbPath = Path.Combine(testFolder, "Default.db");
 
             int walStartLine = 0;
             if (!Console.IsOutputRedirected) try { walStartLine = Console.CursorTop; } catch { }
@@ -396,10 +397,10 @@ namespace Db_TestApp
             Console.WriteLine("___________________");
             Console.WriteLine();
 
-            int memoryStartLine = 0;
-            if (!Console.IsOutputRedirected) try { memoryStartLine = Console.CursorTop; } catch { }
+            int DefaultStartLine = 0;
+            if (!Console.IsOutputRedirected) try { DefaultStartLine = Console.CursorTop; } catch { }
             Console.WriteLine("___________________");
-            Console.WriteLine("Memory 모드 준비중...");
+            Console.WriteLine("Default 모드 준비중...");
             Console.WriteLine("쓴 개수: 0");
             Console.WriteLine("진행시간: 00:00:00");
             Console.WriteLine("___________________");
@@ -411,13 +412,13 @@ namespace Db_TestApp
 
             Task.WaitAll(walTask);
 
-            Task memoryTask = Task.Run(() => WriteWithMode(memoryDbPath, "MEMORY", totalRecords, recordsPerTransaction, updateInterval,
-                (count, elapsed) => UpdateConsole("MEMORY", count, totalRecords, elapsed, memoryStartLine),
-                (elapsed) => UpdateConsoleFinal("MEMORY", totalRecords, elapsed, memoryStartLine)));
+            Task DefaultTask = Task.Run(() => WriteWithMode(DefaultDbPath, "Default", totalRecords, recordsPerTransaction, updateInterval,
+                (count, elapsed) => UpdateConsole("Default", count, totalRecords, elapsed, DefaultStartLine),
+                (elapsed) => UpdateConsoleFinal("Default", totalRecords, elapsed, DefaultStartLine)));
 
-            Task.WaitAll(memoryTask);
+            Task.WaitAll(DefaultTask);
 
-            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, memoryStartLine + 6); } catch { }
+            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, DefaultStartLine + 6); } catch { }
             Console.WriteLine();
             Console.WriteLine("=== 테스트 완료 ===");
             Console.WriteLine("엔터키를 누르면 메뉴로 돌아갑니다...");
@@ -463,10 +464,10 @@ namespace Db_TestApp
             Console.WriteLine("___________________");
             Console.WriteLine();
 
-            int memoryStartLine = 0;
-            if (!Console.IsOutputRedirected) try { memoryStartLine = Console.CursorTop; } catch { }
+            int DefaultStartLine = 0;
+            if (!Console.IsOutputRedirected) try { DefaultStartLine = Console.CursorTop; } catch { }
             Console.WriteLine("___________________");
-            Console.WriteLine("Memory 모드 준비중...");
+            Console.WriteLine("Default 모드 준비중...");
             Console.WriteLine("쓴 개수: 0");
             Console.WriteLine("진행시간: 00:00:00");
             Console.WriteLine("___________________");
@@ -492,25 +493,25 @@ namespace Db_TestApp
 
             Task.WaitAll(walTask);
 
-            // Memory 분할 실행
-            Task memoryTask = Task.Run(() =>
+            // Default 분할 실행
+            Task DefaultTask = Task.Run(() =>
             {
                 Stopwatch swTotal = Stopwatch.StartNew();
                 for (int i = 0; i < splitCount; i++)
                 {
-                    string currentDbPath = Path.Combine(testFolder, $"memory_{i}.db");
+                    string currentDbPath = Path.Combine(testFolder, $"Default_{i}.db");
                     int capturedIndex = i;
-                    WriteWithMode(currentDbPath, "MEMORY", recordsPerSplit, recordsPerTransaction, updateInterval,
-                        (count, elapsed) => UpdateConsole("MEMORY", (capturedIndex * recordsPerSplit) + count, totalRecords, swTotal.Elapsed, memoryStartLine),
+                    WriteWithMode(currentDbPath, "Default", recordsPerSplit, recordsPerTransaction, updateInterval,
+                        (count, elapsed) => UpdateConsole("Default", (capturedIndex * recordsPerSplit) + count, totalRecords, swTotal.Elapsed, DefaultStartLine),
                         null);
                 }
                 swTotal.Stop();
-                UpdateConsoleFinal("MEMORY", totalRecords, swTotal.Elapsed, memoryStartLine);
+                UpdateConsoleFinal("Default", totalRecords, swTotal.Elapsed, DefaultStartLine);
             });
 
-            Task.WaitAll(memoryTask);
+            Task.WaitAll(DefaultTask);
 
-            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, memoryStartLine + 6); } catch { }
+            if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, DefaultStartLine + 6); } catch { }
             Console.WriteLine();
             Console.WriteLine("=== 테스트 완료 ===");
             Console.WriteLine("엔터키를 누르면 메뉴로 돌아갑니다...");
