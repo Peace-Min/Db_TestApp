@@ -69,8 +69,8 @@ namespace Db_TestApp
             input = Console.ReadLine();
             int recordsPerTransaction = string.IsNullOrEmpty(input) ? 1 : int.Parse(input);
 
-            Console.Write("업데이트 간격 (기본 10): ");
-            input = Console.ReadLine();
+            //Console.Write("업데이트 간격 (기본 10): ");
+            //input = Console.ReadLine();
             int updateInterval = recordsPerTransaction >= 10000 ? recordsPerTransaction : recordsPerTransaction * 10;
 
             Console.WriteLine();
@@ -322,7 +322,7 @@ namespace Db_TestApp
                 if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 2); } catch { }
                 Console.WriteLine($"Write - 쓴 개수: {totalRecords:N0} / {totalRecords:N0}".PadRight(60));
                 Console.WriteLine($"Write - 진행시간: {sw2.Elapsed:hh\\:mm\\:ss\\.fff} (WAL 크기: {currentWalSize / 1024.0:F1} KB)".PadRight(60));
-                Console.WriteLine($"Read  - 조회된 행: {Interlocked.Read(ref totalReads):N0} (시도: {Interlocked.Read(ref queryCount):N0}회)".PadRight(60));
+                Console.WriteLine($"Read  - 조회된 행: {Interlocked.Read(ref totalReads):N0}".PadRight(60));
                 Console.WriteLine($"Read  - 진행시간: {swReader.Elapsed:hh\\:mm\\:ss\\.fff}".PadRight(60));
 
                 Thread.Sleep(50);
@@ -434,17 +434,21 @@ namespace Db_TestApp
             string input = Console.ReadLine();
             int totalRecords = string.IsNullOrEmpty(input) ? 2_000_000 : int.Parse(input);
 
-            Console.Write("트랜잭션 당 레코드 수 (기본 1): ");
-            input = Console.ReadLine();
-            int recordsPerTransaction = string.IsNullOrEmpty(input) ? 1 : int.Parse(input);
+            //Console.Write("트랜잭션 당 레코드 수 (기본 1): ");
+            //input = Console.ReadLine();
+            //int recordsPerTransaction = string.IsNullOrEmpty(input) ? 1 : int.Parse(input);
 
-            Console.Write("화면 디스플레이 업데이트 (기본 1000): ");
-            input = Console.ReadLine();
-            int updateInterval = string.IsNullOrEmpty(input) ? 1000 : int.Parse(input);
+            //Console.Write("화면 디스플레이 업데이트 (기본 1000): ");
+            //input = Console.ReadLine();
+            //int updateInterval = string.IsNullOrEmpty(input) ? 1000 : int.Parse(input);
+
 
             Console.Write("분할 실행 횟수 (기본 100): ");
             input = Console.ReadLine();
             int splitCount = string.IsNullOrEmpty(input) ? 100 : int.Parse(input);
+
+            int recordsPerTransaction = 1;
+            int updateInterval = recordsPerTransaction >= 10000 ? recordsPerTransaction : recordsPerTransaction * 10;
 
             Console.WriteLine();
             Console.WriteLine($"설정: 총 {totalRecords:N0}개, 분할 {splitCount:N0}회 (DB당 {totalRecords / splitCount:N0}개), 트랜잭션 당 {recordsPerTransaction:N0}개");
