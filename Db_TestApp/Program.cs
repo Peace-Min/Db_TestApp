@@ -305,17 +305,17 @@ namespace Db_TestApp
                         // 진행 상황 업데이트
                         if (recordsWritten % updateInterval == 0 || recordsWritten == totalRecords)
                         {
-                            long currentWalSize = 0;
-                            try
-                            {
-                                string walPath = dbPathConcurrency + "-wal";
-                                if (File.Exists(walPath)) currentWalSize = new FileInfo(walPath).Length;
-                            }
-                            catch { }
+                            //long currentWalSize = 0;
+                            //try
+                            //{
+                            //    string walPath = dbPathConcurrency + "-wal";
+                            //    if (File.Exists(walPath)) currentWalSize = new FileInfo(walPath).Length;
+                            //}
+                            //catch { }
 
                             if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 2); } catch { }
                             Console.WriteLine($"Write - 쓴 개수: {recordsWritten:N0} / {totalRecords:N0}".PadRight(60));
-                            Console.WriteLine($"Write - 진행시간: {sw2.Elapsed:hh\\:mm\\:ss\\.fff} (WAL 크기: {currentWalSize / 1024.0:F1} KB)".PadRight(60));
+                            Console.WriteLine($"Write - 진행시간: {sw2.Elapsed:hh\\:mm\\:ss\\.fff}".PadRight(60));
                             Console.WriteLine($"Read  - 조회된 행: {totalReads:N0} (시도: {Interlocked.Read(ref queryCount):N0}회)".PadRight(60));
                             Console.WriteLine($"Read  - 진행시간: {swReader.Elapsed:hh\\:mm\\:ss\\.fff}".PadRight(60));
                         }
@@ -328,17 +328,17 @@ namespace Db_TestApp
             // Reader가 완료될 때까지 콘솔 업데이트 계속 수행 (Write가 먼저 끝나도 Read 현황 갱신)
             while (!readerTask.IsCompleted)
             {
-                long currentWalSize = 0;
-                try
-                {
-                    string walPath = dbPathConcurrency + "-wal";
-                    if (File.Exists(walPath)) currentWalSize = new FileInfo(walPath).Length;
-                }
-                catch { }
+                //long currentWalSize = 0;
+                //try
+                //{
+                //    string walPath = dbPathConcurrency + "-wal";
+                //    if (File.Exists(walPath)) currentWalSize = new FileInfo(walPath).Length;
+                //}
+                //catch { }
 
                 if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 2); } catch { }
                 Console.WriteLine($"Write - 쓴 개수: {totalRecords:N0} / {totalRecords:N0}".PadRight(60));
-                Console.WriteLine($"Write - 진행시간: {sw2.Elapsed:hh\\:mm\\:ss\\.fff} (WAL 크기: {currentWalSize / 1024.0:F1} KB)".PadRight(60));
+                Console.WriteLine($"Write - 진행시간: {sw2.Elapsed:hh\\:mm\\:ss\\.fff}".PadRight(60));
                 Console.WriteLine($"Read  - 조회된 행: {Interlocked.Read(ref totalReads):N0}".PadRight(60));
                 Console.WriteLine($"Read  - 진행시간: {swReader.Elapsed:hh\\:mm\\:ss\\.fff}".PadRight(60));
 
@@ -357,9 +357,17 @@ namespace Db_TestApp
 
             Console.WriteLine();
 
+            long currentWalSize = 0;
+            try
+            {
+                string walPath = dbPathConcurrency + "-wal";
+                if (File.Exists(walPath)) currentWalSize = new FileInfo(walPath).Length;
+            }
+            catch { }
+
             if (!Console.IsOutputRedirected) try { Console.SetCursorPosition(0, displayStartLine + 7); } catch { }
             Console.WriteLine(">>> 2단계 완료.");
-            Console.WriteLine($"    Write 소요 시간: {sw2.Elapsed.TotalSeconds:F3}초");
+            Console.WriteLine($"    Write 소요 시간: {sw2.Elapsed.TotalSeconds:F3}초 (WAL 크기: {currentWalSize / 1024.0:F1} KB)");
             Console.WriteLine($"    Read 작업 시간: {swReader.Elapsed.TotalSeconds:F3}초 (총 {Interlocked.Read(ref queryCount):N0}회 시도)");
             Console.WriteLine("______________________________________________________");
 
